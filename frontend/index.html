@@ -79,8 +79,12 @@ tr.click:hover{background:#1b3045}
 .bar{height:7px;background:#091522;border-radius:5px;min-width:60px;overflow:hidden}
 .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--blue),var(--cyan));border-radius:5px}
 .leg{color:var(--muted);font-size:11px;margin-top:9px}
+.chart-tooltip{position:fixed;z-index:20;display:none;max-width:260px;pointer-events:none;padding:8px 10px;border:1px solid #4f6a83;border-radius:8px;background:#091522;color:var(--text);box-shadow:var(--shadow);font-size:12px;line-height:1.35}
+.chart-tooltip strong{color:var(--red)}
+.conflict-summary{margin-top:8px}
+.conflict-summary .chip{margin:3px 4px 3px 0}
+#cl .clear-row{color:var(--green)}
 #map{background:radial-gradient(ellipse at center,#142b40 0,transparent 75%);border-radius:10px;overflow:hidden}
-#compare{overflow-x:auto}
 @media(max-width:1100px){.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.layout{grid-template-columns:250px minmax(0,1fr);padding:15px;gap:14px}}
 @media(max-width:820px){header{padding:12px 15px;flex-wrap:wrap}.brand{width:100%}.layout{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}aside{position:static;max-height:none}.two{grid-template-columns:1fr}.page-heading{align-items:flex-start;flex-direction:column}}
 @media(max-width:460px){.metrics{grid-template-columns:1fr 1fr}.metric{padding:12px}.metric-value{font-size:22px}.layout{padding:11px}}
@@ -114,24 +118,7 @@ tr.click:hover{background:#1b3045}
 <option value="sjf">Shortest journey first</option>
 </select>
 <button id="bOS">Run OS scheduler</button>
-<label>Optimizer starts from</label>
-<select id="sf">
-<option value="os">OS scheduler result</option>
-<option value="planned">Delayed timetable</option>
-</select>
-<label>Optimization algorithm</label>
-<select id="algo">
-<option value="pso">PSO - Particle Swarm Optimization</option>
-<option value="ga">GA - Genetic Algorithm</option>
-<option value="aco">ACO - Ant Colony Optimization</option>
-<option value="abc">ABC - Artificial Bee Colony</option>
-<option value="gurobi">Gurobi - Exact MILP Solver</option>
-</select>
-<label>Iterations (metaheuristics only)</label>
-<input id="it" type="number" value="3000" min="100" max="20000" step="500">
-<button id="bOpt">Run selected optimizer</button>
-<button id="bCompare" class="alt">Compare all 5 algorithms</button>
-<div id="compare" style="margin-top:10px"></div>
+<button id="bOpt">Optimize with SA, PSO, GA &amp; CP-SAT</button>
 <div id="msg">Connect to the API to start.</div>
 </aside>
 
@@ -194,6 +181,7 @@ tr.click:hover{background:#1b3045}
 </select>
 </div>
 <div id="chart"></div>
+<div id="chartTooltip" class="chart-tooltip"></div>
 <div class="leg">Each line represents a train. Red lines indicate trains in conflict. Red circles mark shared-track conflicts.</div>
 </div>
 
@@ -223,7 +211,7 @@ tr.click:hover{background:#1b3045}
 
 <script>
 const $=id=>document.getElementById(id);
-const S={net:null,tr:[],by:{},trk:{},p:{},xy:{},res:{},hist:[],view:'before',t:0,key:'',lo:0,hi:1};
+const S={net:null,tr:[],by:{},trk:{},p:{},xy:{},res:{},hist:[],view:'before',t:0,key:'',lo:0,hi:1,method:'',improvement:'',bestOs:null,algorithmStatus:null};
 const PC={1:'#587585',2:'#6aa3c4',3:'#6fcab0',4:'#d8c866',5:'#f4f7f8'};
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const API=()=>$('api').value.replace(/\/$/,'');
@@ -245,9 +233,6 @@ headway_min:+$('hw').value,
 disturb_count:+$('dc').value,
 disturb_seed:+$('ds').value,
 policy:$('pol').value,
-start_from:$('sf').value,
-algorithm:$('algo').value,
-iterations:+$('it').value
 });
 
 async function connect(){
@@ -312,6 +297,27 @@ $('tm').value=S.t;
 draw()
 }
 
+function bindChartTooltips(){
+const tooltip=$('chartTooltip');
+if(!tooltip)return;
+document.querySelectorAll('#chart [data-tooltip]').forEach(element=>{
+element.addEventListener('mouseenter',event=>{
+tooltip.innerHTML=event.currentTarget.dataset.tooltip;
+tooltip.style.display='block';
+});
+element.addEventListener('mousemove',event=>{
+const gap=14;
+let x=event.clientX+gap,y=event.clientY+gap;
+const rect=tooltip.getBoundingClientRect();
+if(x+rect.width>window.innerWidth) x=event.clientX-rect.width-gap;
+if(y+rect.height>window.innerHeight) y=event.clientY-rect.height-gap;
+tooltip.style.left=`${Math.max(8,x)}px`;
+tooltip.style.top=`${Math.max(8,y)}px`;
+});
+element.addEventListener('mouseleave',()=>{tooltip.style.display='none'});
+});
+}
+
 function drawMap(){
 const R=cur(),b=bad(R),cc={};
 (R?R.conflicts:[]).forEach(c=>cc[c.track_id]=(cc[c.track_id]||0)+1);
@@ -362,20 +368,23 @@ if(b.has(sc.train_id)!==pass)return;
 const pts=sc.steps.flatMap(q=>[[q.enter,S.p[q.frm]],[q.exit,S.p[q.to]]]);
 if(pts[pts.length-1][0]<t0||pts[0][0]>t0+span)return;
 const t=S.by[sc.train_id]||{},d=R.disturbance&&R.disturbance[sc.train_id];
-s+=`<polyline fill="none" points="${pts.map(q=>X(q[0])+','+Y(q[1])).join(' ')}" stroke="${pass?'var(--red)':PC[t.priority||2]}" stroke-width="${pass?2.4:1.2}" opacity="${pass?1:.75}" ${d?'stroke-dasharray="5 3"':''}><title>${sc.train_id} ${esc(t.name||'')}</title></polyline>`;
-if(pass){
-const q=pts.find(z=>z[0]>=t0)||pts[0];
-s+=`<text class="lb" fill="var(--red)" x="${X(q[0])+3}" y="${Y(q[1])-3}">${sc.train_id}</text>`
-}
+const summary=(R.metrics.conflict_trains||[]).find(x=>x.train_id===sc.train_id);
+const peers=summary?(summary.peers||[]):[];
+const tracks=summary?(summary.tracks||[]):[];
+const tooltip=pass?`<strong>Train ${esc(sc.train_id)}</strong>${t.name?' - '+esc(t.name):''}<br>Conflicts with: ${peers.length?peers.map(esc).join(', '):'—'}<br>Tracks: ${tracks.length?tracks.map(esc).join(', '):'—'}<br>Conflict count: ${summary?summary.conflict_count:1}`:`${esc(sc.train_id)}${t.name?' - '+esc(t.name):''}`;
+s+=`<polyline data-tooltip="${tooltip}" ${pass?'class="conflict-line"':''} fill="none" points="${pts.map(q=>X(q[0])+','+Y(q[1])).join(' ')}" stroke="${pass?'var(--red)':PC[t.priority||2]}" stroke-width="${pass?3:1.2}" opacity="${pass?1:.75}" ${d?'stroke-dasharray="5 3"':''} style="${pass?'cursor:help':''}"><title>${esc(sc.train_id)}${t.name?' - '+esc(t.name):''}${pass?' - in conflict':''}</title></polyline>`;
 }));
 R.conflicts.forEach(c=>{
 const k=S.trk[c.track_id];
 if(!k||c.time<t0||c.time>t0+span)return;
-s+=`<circle cx="${X(c.time)}" cy="${Y((S.p[k.a]+S.p[k.b])/2)}" r="7" fill="none" stroke="var(--red)" stroke-width="2"><title>${c.train_a} and ${c.train_b} on ${c.track_id} at ${fmt(c.time)}</title></circle>`
+const group=(R.metrics.conflict_groups||[]).find(g=>g.track_id===c.track_id&&Math.abs(g.time-c.time)<=0.05);
+const trains=group?(group.trains||[c.train_a,c.train_b]):[c.train_a,c.train_b];
+s+=`<circle class="conflict-line" data-tooltip="<strong>${trains.map(esc).join(', ')}</strong><br>Track ${esc(c.track_id)}<br>Time ${fmt(c.time)}<br>${trains.length} trains in this conflict group" cx="${X(c.time)}" cy="${Y((S.p[k.a]+S.p[k.b])/2)}" r="9" fill="none" stroke="var(--red)" stroke-width="2" style="cursor:help"><title>${trains.join(', ')} on ${c.track_id} at ${fmt(c.time)}</title></circle>`
 });
 s+='</g>'
 }
 $('chart').innerHTML=s+`<line x1="${X(S.t)}" x2="${X(S.t)}" y1="${T}" y2="${H-B}" stroke="var(--amb)" stroke-width="1.5"/></svg>`
+bindChartTooltips();
 }
 
 function drawStats(){
@@ -384,7 +393,7 @@ $('kpiTrains').textContent=S.tr.length.toLocaleString();
 $('kpiConflicts').textContent=metrics?metrics.conflicts.toLocaleString():'—';
 $('kpiDelay').textContent=metrics?Number(metrics.solver_delay_min||0).toFixed(1)+'m':'—';
 $('kpiStatus').textContent=S.net?'Online':'Offline';
-$('kpiConflictFoot').textContent=S.view==='before'?'Before optimization':S.view==='os'?'After OS scheduling':'After metaheuristic';
+$('kpiConflictFoot').textContent=S.view==='before'?'Before optimization':S.view==='os'?'After OS scheduling':(S.improvement?`${S.method||'Automatic'} · ${S.improvement}`:'After metaheuristic');
 const V=[['before','Before'],['os','OS scheduler'],['opt','Optimizer']],m=k=>S.res[k]&&S.res[k].metrics;
 const row=(l,f,fx)=>`<tr><th>${l}</th>${V.map(([k])=>{
 const x=m(k);if(!x)return '<td>-</td>';
@@ -392,8 +401,33 @@ const v=x[f],b=m('before')[f];
 return `<td class="num ${k!=='before'&&v<b?'g':''}">${fx?fx(v):v}</td>`
 }).join('')}</tr>`;
 $('kpi').innerHTML=`<table><tr><th></th>${V.map(v=>`<th>${v[1]}</th>`).join('')}</tr>${row('Conflicts','conflicts')}${row('Delay added (min)','solver_delay_min',v=>v.toFixed(1))}${row('Fitness (lower is better)','fitness',v=>v.toFixed(0))}</table>`;
+if(S.bestOs&&m('opt')){
+const reduction=Math.max(0,S.bestOs.fitness-m('opt').fitness);
+$('kpi').innerHTML+=`<div class="leg">Best OS policy (${esc(S.bestOs.policy)}) fitness: ${S.bestOs.fitness.toFixed(2)} · Optimizer fitness: ${m('opt').fitness.toFixed(2)} · ${reduction>0.001?`Improvement: ${reduction.toFixed(2)}`:'Matched best OS score'}</div>`;
+}
+if(S.algorithmStatus){
+const labels={simulated_annealing:'Simulated annealing',pso:'PSO',ga:'GA',constraint_programming:'CP-SAT'};
+const methods=Object.entries(S.algorithmStatus).map(([name,result])=>{
+const score=Number.isFinite(result.fitness)?` · fitness ${result.fitness.toFixed(2)}`:'';
+const message=result.message?` · ${esc(result.message)}`:'';
+return `${labels[name]||esc(name)}: ${esc(result.status)}${score}${message}`;
+});
+$('kpi').innerHTML+=`<div class="leg">Algorithms checked: ${methods.join(' | ')}</div>`;
+}
 const R=cur();
-$('cl').innerHTML=!R?'':R.conflicts.length?`<table><tr><th>Time</th><th>Track</th><th>Trains</th><th>Type</th></tr>${R.conflicts.slice(0,14).map(c=>`<tr class="click" data-t="${c.time}"><td class="num">${fmt(c.time)}</td><td>${c.track_id}</td><td>${c.train_a}, ${c.train_b}</td><td>${c.kind==='head_on'?'Head-on':'Too close'}</td></tr>`).join('')}</table>${R.conflicts.length>14?`<div class="leg">+ ${R.conflicts.length-14} more</div>`:''}<div class="leg">Click a row to jump to that moment.</div>`:'<div style="color:var(--grn);font-weight:600">No conflicts in this view.</div>';
+let conflictLog='';
+if(!R){
+conflictLog='';
+}else if(R.conflicts.length){
+const summaries=R.metrics.conflict_trains||[];
+const clear=R.metrics.clear_trains||[];
+const clearHtml=clear.length?clear.map(x=>'<span class="chip clear-row">'+esc(x)+'</span>').join(''):'<span class="chip">None</span>';
+conflictLog=`<table><tr><th>Train</th><th>Conflicts</th><th>Other trains</th><th>Tracks</th></tr>${summaries.slice(0,20).map(s=>`<tr class="click" data-t="${s.first_time}"><td><strong>${esc(s.train_id)}</strong></td><td class="num">${s.conflict_count}</td><td>${s.peers.map(esc).join(', ')}</td><td>${s.tracks.join(', ')}</td></tr>`).join('')}</table>${summaries.length>20?`<div class="leg">+ ${summaries.length-20} conflicting trains</div>`:''}<div class="conflict-summary"><strong>Trains without conflicts:</strong> ${clearHtml}</div><div class="leg">One row per conflicting train. Click a row to jump to its first conflict.</div>`;
+}else{
+const clear=R.metrics.clear_trains||S.tr.map(t=>t.id);
+conflictLog='<div style="color:var(--grn);font-weight:600">No conflicts in this view.</div><div class="conflict-summary"><strong>Trains without conflicts:</strong> '+clear.map(x=>'<span class="chip clear-row">'+esc(x)+'</span>').join('')+'</div>';
+}
+$('cl').innerHTML=conflictLog;
 document.querySelectorAll('#cl tr.click').forEach(r=>r.onclick=()=>setT(+r.dataset.t));
 const d=R?Object.entries(R.metrics.delay_by_train).sort((a,b)=>b[1]-a[1]).slice(0,8):[],mxd=d.length?d[0][1]:1;
 $('dl').innerHTML=d.length?`<table>${d.map(([k,v])=>`<tr><td>${k}</td><td class="num">${v.toFixed(1)} min</td><td><div class="bar"><i style="width:${v/mxd*100}%"></i></div></td></tr>`).join('')}</table>`:'<div class="leg">No extra delay in this view. Run a solver to see which trains it holds back.</div>';
@@ -424,7 +458,7 @@ draw()
 }
 function fresh(){
 const p=params(),k=[p.headway_min,p.disturb_count,p.disturb_seed].join();
-if(k!==S.key){S.res={};S.hist=[];S.key=k}
+if(k!==S.key){S.res={};S.hist=[];S.method='';S.improvement='';S.bestOs=null;S.algorithmStatus=null;S.key=k}
 }
 function showDist(R){
 $('dist').innerHTML=Object.entries(R.disturbance||{}).map(([k,v])=>`<span class="chip">${k} +${v} min</span>`).join('')
@@ -434,6 +468,7 @@ function firstConflict(R){const c=R.conflicts[0];return c?c.time:S.lo}
 const runBase=()=>run($('bBase'),'Loading the delayed timetable...',async()=>{
 const p=params();
 S.res={};S.hist=[];
+S.method='';S.improvement='';S.bestOs=null;S.algorithmStatus=null;
 S.key=[p.headway_min,p.disturb_count,p.disturb_seed].join();
 S.res.before=await call(`/api/baseline?headway_min=${p.headway_min}&disturb_count=${p.disturb_count}&disturb_seed=${p.disturb_seed}`);
 S.view='before';showDist(S.res.before);range();setT(firstConflict(S.res.before))
@@ -445,30 +480,19 @@ const r=await call('/api/solve/os',params());
 S.res.before=r.before;S.res.os=r.after;S.view='os';range();showDist(r.before)
 });
 
-$('bOpt').onclick=()=>run($('bOpt'),'Running the optimizer. This can take up to a minute...',async()=>{
+$('bOpt').onclick=()=>run($('bOpt'),'Running simulated annealing, PSO, GA, and CP-SAT...',async()=>{
 fresh();
 const r=await call('/api/solve/optimize',params());
-S.res.before=r.before;S.res.opt=r.after;S.hist=r.history;S.view='opt';range();showDist(r.before)
+S.res.before=r.before;S.res.opt=r.after;S.hist=r.history;S.method=r.method||'automatic';
+S.bestOs={policy:r.best_os_policy||'OS',fitness:Number(r.best_os_fitness||0)};
+S.algorithmStatus=r.algorithm_status||null;
+const saved=Math.max(0,Number(r.fitness_reduction||0));
+S.improvement=saved>0?`beats best OS by ${saved.toFixed(2)} fitness`:`matches best OS score (${S.bestOs.policy})`;
+S.view='opt';range();showDist(r.before)
 });
 
 $('bBase').onclick=runBase;
 $('conn').onclick=connect;
-
-$('bCompare').onclick=()=>run($('bCompare'),'Running all five algorithms on the same scenario...',async()=>{
-fresh();
-const r=await call('/api/compare/optimizers',params());
-const names={pso:'PSO',ga:'GA',aco:'ACO',abc:'ABC',gurobi:'Gurobi'};
-const rows=r.results.map(x=>x.ok?
-'<tr><td>'+names[x.algorithm]+'</td><td>'+x.result.metrics.conflicts+'</td><td>'+x.result.metrics.solver_delay_min+'</td><td>'+x.result.metrics.weighted_delay+'</td><td>'+x.result.metrics.fitness+'</td><td>Completed</td></tr>':
-'<tr><td>'+names[x.algorithm]+'</td><td colspan="4">'+esc(x.error)+'</td><td>Unavailable</td></tr>').join('');
-$('compare').innerHTML='<h2>Five-algorithm comparison</h2><table><tr><th>Algorithm</th><th>Conflicts</th><th>Added delay</th><th>Weighted delay</th><th>Fitness</th><th>Status</th></tr>'+rows+'</table><div class="leg">Same scenario, start timetable and fitness function. Gurobi needs a separate installation and valid license.</div>';
-S.res.before=r.before;
-const valid=r.results.filter(x=>x.ok);
-if(valid.length){
-const best=valid.reduce((a,b)=>a.result.metrics.fitness<=b.result.metrics.fitness?a:b);
-S.res.opt=best.result;S.hist=best.history||[];S.view='opt';range();showDist(r.before)
-}
-});
 
 $('tm').oninput=e=>{S.t=+e.target.value;draw()};
 $('span').onchange=draw;

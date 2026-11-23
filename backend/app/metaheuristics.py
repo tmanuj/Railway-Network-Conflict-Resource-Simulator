@@ -6,15 +6,19 @@ Algorithms:
 2. GA - Genetic Algorithm
 3. ACO - Ant Colony Optimization
 4. ABC - Artificial Bee Colony
-5. Gurobi - Exact MILP Solver (optional)
+5. CP-SAT - Constraint Programming
+6. Gurobi - Exact MILP Solver (optional)
 """
 
+import copy
+import math
 import random
 from typing import Callable
 
 from .evaluation import Evaluator
 from .models import SolveParams
-from .schedule import Network
+from .optimizer import anneal
+from .schedule import Network, simulate
 
 
 # --------------------------------------------------
@@ -548,8 +552,128 @@ def abc(net: Network, ev: Evaluator, start, p: SolveParams):
 
 
 # --------------------------------------------------
-# 5. GUROBI EXACT OPTIMIZATION
+# 5. CONSTRAINT PROGRAMMING
 # --------------------------------------------------
+
+# --------------------------------------------------
+# CP-SAT resource allocation
+# --------------------------------------------------
+
+def constraint_programming(
+    net: Network,
+    ev: Evaluator,
+    start,
+    p: SolveParams
+):
+    """Solve the bounded hold-allocation model with OR-Tools CP-SAT."""
+    try:
+        from ortools.sat.python import cp_model
+    except ImportError as exc:
+        raise RuntimeError(
+            "Constraint programming requires OR-Tools. Install backend requirements."
+        ) from exc
+
+    keys = _layout(net)
+    if not keys:
+        raise ValueError("No train segments available")
+
+    scale = 100
+    model = cp_model.CpModel()
+    start_values = dict(zip(keys, _start_vector(keys, start)))
+    max_hold_units = {
+        key: max(
+            0,
+            int(math.floor(p.max_hold_min * 2 + 1e-9)),
+            int(math.ceil(max(0.0, start_values[key]) * 2 - 1e-9)),
+        )
+        for key in keys
+    }
+    hold_vars = {
+        key: model.new_int_var(0, max_hold_units[key], f"hold_{key[0]}_{key[1]}")
+        for key in keys
+    }
+
+    for key, value in start_values.items():
+        model.add_hint(
+            hold_vars[key],
+            min(max_hold_units[key], max(0, int(round(value * 2))))
+        )
+
+    occupancies = {}
+    for schedule in simulate(net):
+        train = net.trains[schedule.train_id]
+        for segment, step in enumerate(schedule.steps):
+            track = net.tracks[step.track_id]
+            resource = (
+                step.track_id
+                if track.single_track
+                else f"{step.track_id}:{step.direction}"
+            )
+            previous_holds = [
+                hold_vars[(train.id, index)]
+                for index in range(segment + 1)
+            ]
+            start_expr = (
+                math.floor(step.enter * scale + 1e-8)
+                + scale // 2 * sum(previous_holds)
+            )
+            start_var = model.new_int_var(
+                math.floor(step.enter * scale + 1e-8),
+                math.floor(step.enter * scale + 1e-8)
+                + (scale // 2) * sum(
+                    max_hold_units[(train.id, index)]
+                    for index in range(segment + 1)
+                ),
+                f"entry_{train.id}_{segment}"
+            )
+            model.add(start_var == start_expr)
+            duration = math.ceil(
+                (step.exit - step.enter + p.headway_min) * scale - 1e-9
+            )
+            interval = model.new_interval_var(
+                start_var,
+                duration,
+                start_var + duration,
+                f"occupancy_{train.id}_{segment}"
+            )
+            occupancies.setdefault(resource, []).append(interval)
+
+    for intervals in occupancies.values():
+        if len(intervals) > 1:
+            model.add_no_overlap(intervals)
+
+    model.minimize(sum(
+        net.trains[train_id].priority * hold_vars[(train_id, segment)]
+        for train_id, segment in keys
+    ))
+
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = 1.0
+    solver.parameters.num_search_workers = 1
+    solver.parameters.random_seed = p.seed
+    status = solver.solve(model)
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        raise RuntimeError(
+            f"CP-SAT did not find a feasible hold allocation: {solver.status_name(status)}"
+        )
+
+    holds = _decode(
+        keys,
+        [solver.value(hold_vars[key]) / 2 for key in keys]
+    )
+    result = ev.evaluate(holds)
+    if result.conflicts:
+        raise RuntimeError(
+            "CP-SAT candidate failed exact conflict validation"
+        )
+
+    history = [{
+        "iter": int(solver.num_branches),
+        "best": round(result.fitness, 3),
+        "current": round(result.fitness, 3),
+        "conflicts": 0,
+    }]
+    return holds, result, history
 
 def gurobi(net: Network, ev: Evaluator, start, p: SolveParams):
 
@@ -712,6 +836,7 @@ ALGORITHMS: dict[str, Callable] = {
     "ga": ga,
     "aco": aco,
     "abc": abc,
+    "cp": constraint_programming,
     "gurobi": gurobi
 }
 
@@ -741,3 +866,258 @@ def run_algorithm(
         start,
         params
     )
+
+
+def run_hybrid_optimizer(
+    net: Network,
+    ev: Evaluator,
+    start,
+    params: SolveParams
+):
+    """Run SA, PSO, GA, and CP-SAT from OS schedules; retain the best valid result."""
+    from .os_scheduler import os_schedule
+
+    def rank(candidate):
+        result = candidate
+        return (
+            result.fitness,
+            len(result.conflicts),
+            round(sum(conflict.overlap_min for conflict in result.conflicts), 6),
+            round(result.weighted_delay, 6),
+        )
+
+    initial_result = ev.evaluate(start)
+    if initial_result.conflicts:
+        start = os_schedule(net, params)
+        initial_result = ev.evaluate(start)
+
+    schedules = [(f"os-{params.policy}", copy.deepcopy(start), initial_result)]
+    for policy in ("fcfs", "priority", "sjf"):
+        policy_params = params.model_copy(update={"policy": policy})
+        if policy == params.policy:
+            continue
+        holds = os_schedule(net, policy_params)
+        schedules.append((f"os-{policy}", holds, ev.evaluate(holds)))
+
+    best_os_method, holds, best_os_result = min(
+        schedules,
+        key=lambda item: rank(item[2])
+    )
+    method = best_os_method
+    result = best_os_result
+    best_holds = copy.deepcopy(holds)
+    best_result = result
+    algorithm_histories = {}
+    algorithm_status = {}
+    history = [{
+        "iter": 0,
+        "best": round(best_result.fitness, 3),
+        "current": round(best_result.fitness, 3),
+        "conflicts": len(best_result.conflicts),
+    }]
+
+    layout_size = max(1, len(_layout(net)))
+    size_factor = max(1, math.ceil(layout_size / 2000))
+    algorithm_runs = (
+        (
+            "simulated_annealing",
+            anneal,
+            min(100, max(1, params.iterations // size_factor)),
+            params.seed + 11,
+        ),
+        (
+            "pso",
+            pso,
+            min(4, max(1, params.iterations // (500 * size_factor))),
+            params.seed + 23,
+        ),
+        (
+            "ga",
+            ga,
+            min(3, max(1, params.iterations // (1000 * size_factor))),
+            params.seed + 37,
+        ),
+    )
+    for name, algorithm, iterations, seed in algorithm_runs:
+        algorithm_params = params.model_copy(
+            update={"iterations": iterations, "seed": seed}
+        )
+        candidate_holds, candidate_result, candidate_history = algorithm(
+            net,
+            ev,
+            holds,
+            algorithm_params
+        )
+        algorithm_histories[name] = candidate_history
+        algorithm_status[name] = {
+            "status": "completed",
+            "fitness": round(candidate_result.fitness, 3),
+        }
+        if rank(candidate_result) < rank(best_result):
+            best_holds = copy.deepcopy(candidate_holds)
+            best_result = candidate_result
+            method = name
+            history = candidate_history
+
+    try:
+        cp_holds, cp_result, cp_history = constraint_programming(
+            net,
+            ev,
+            holds,
+            params
+        )
+        algorithm_histories["constraint_programming"] = cp_history
+        algorithm_status["constraint_programming"] = {
+            "status": "completed",
+            "fitness": round(cp_result.fitness, 3),
+        }
+        if rank(cp_result) < rank(best_result):
+            best_holds = copy.deepcopy(cp_holds)
+            best_result = cp_result
+            method = "constraint_programming"
+            history = cp_history
+    except RuntimeError as exc:
+        algorithm_histories["constraint_programming"] = []
+        algorithm_status["constraint_programming"] = {
+            "status": "unavailable",
+            "message": str(exc),
+        }
+
+    # Keep evaluation work bounded for large real-world timetables. Each
+    # segment is checked by binary search rather than running every metaheuristic
+    # for thousands of iterations over the whole network.
+    budget = min(240, max(0, params.iterations))
+    prune_budget = budget * 2 // 3
+    keys = [
+        (train_id, segment)
+        for train_id, values in best_holds.items()
+        for segment, value in enumerate(values)
+        if value > 0
+    ]
+    keys.sort(
+        key=lambda key: (
+            -best_holds[key[0]][key[1]]
+            * net.trains[key[0]].priority
+        )
+    )
+    evaluations = 0
+
+    for train_id, segment in keys:
+        if evaluations >= prune_budget:
+            break
+        original = best_holds[train_id][segment]
+        best_local_value = original
+        best_local_result = best_result
+
+        trial_holds = copy.deepcopy(best_holds)
+        trial_holds[train_id][segment] = 0.0
+        zero_result = ev.evaluate(trial_holds)
+        evaluations += 1
+        if rank(zero_result) <= rank(best_local_result):
+            best_local_value = 0.0
+            best_local_result = zero_result
+        else:
+            # Search for a smaller feasible hold; maintain the upper bound as
+            # a known-valid schedule and never accept extra conflicts.
+            low, high = 0.0, original
+            while high - low > 0.5 and evaluations < prune_budget:
+                middle = round(((low + high) / 2) * 2) / 2
+                if middle <= low or middle >= high:
+                    break
+                trial_holds = copy.deepcopy(best_holds)
+                trial_holds[train_id][segment] = middle
+                trial_result = ev.evaluate(trial_holds)
+                evaluations += 1
+                if rank(trial_result) <= rank(best_local_result):
+                    high = middle
+                    best_local_value = middle
+                    best_local_result = trial_result
+                else:
+                    low = middle
+
+        best_holds[train_id][segment] = best_local_value
+        best_result = best_local_result
+        if evaluations % 50 < 2:
+            history.append({
+                "iter": evaluations,
+                "best": round(best_result.fitness, 3),
+                "current": round(best_result.fitness, 3),
+                "conflicts": len(best_result.conflicts),
+            })
+
+    # Try reallocating some waiting from higher-priority trains to lower-
+    # priority trains sharing the same single-track block.
+    track_cells = {}
+    for train_id, train in net.trains.items():
+        for segment, (a, b) in enumerate(zip(train.route, train.route[1:])):
+            track = net.track_between(a, b)
+            if track and track.single_track:
+                track_cells.setdefault(track.id, []).append((train_id, segment))
+
+    transfer_rng = random.Random(params.seed)
+    while evaluations < budget:
+        eligible = [
+            (track_id, cell)
+            for track_id, cells in track_cells.items()
+            for cell in cells
+            if best_holds[cell[0]][cell[1]] >= 0.5
+            and any(
+                other_id != cell[0]
+                and net.trains[other_id].priority < net.trains[cell[0]].priority
+                and params.max_hold_min - best_holds[other_id][other_segment] >= 0.5
+                for other_id, other_segment in cells
+            )
+        ]
+        if not eligible:
+            break
+
+        track_id, (source_id, source_segment) = transfer_rng.choice(eligible)
+        destinations = [
+            cell for cell in track_cells[track_id]
+            if cell[0] != source_id
+            and net.trains[cell[0]].priority < net.trains[source_id].priority
+            and params.max_hold_min - best_holds[cell[0]][cell[1]] >= 0.5
+        ]
+        if not destinations:
+            continue
+
+        destination_id, destination_segment = transfer_rng.choice(destinations)
+        amount = min(
+            1.0,
+            best_holds[source_id][source_segment],
+            params.max_hold_min - best_holds[destination_id][destination_segment],
+        )
+        amount = round(amount * 2) / 2
+        if amount <= 0:
+            continue
+
+        candidate_holds = copy.deepcopy(best_holds)
+        candidate_holds[source_id][source_segment] -= amount
+        candidate_holds[destination_id][destination_segment] += amount
+        candidate_result = ev.evaluate(candidate_holds)
+        evaluations += 1
+        if rank(candidate_result) < rank(best_result):
+            best_holds = candidate_holds
+            best_result = candidate_result
+        if evaluations % 20 == 0:
+            history.append({
+                "iter": evaluations,
+                "best": round(best_result.fitness, 3),
+                "current": round(candidate_result.fitness, 3),
+                "conflicts": len(best_result.conflicts),
+            })
+
+    if rank(best_result) > rank(best_os_result):
+        best_holds = copy.deepcopy(holds)
+        best_result = best_os_result
+        method = best_os_method
+
+    search_info = {
+        "best_os_policy": best_os_method,
+        "best_os_fitness": best_os_result.fitness,
+        "best_os_conflicts": len(best_os_result.conflicts),
+        "best_os_weighted_delay": best_os_result.weighted_delay,
+        "algorithm_status": algorithm_status,
+        "algorithm_history": algorithm_histories,
+    }
+    return best_holds, best_result, history, f"{method}-optimized", search_info

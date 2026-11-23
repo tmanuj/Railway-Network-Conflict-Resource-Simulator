@@ -8,8 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import config, db, repository
 from .evaluation import Evaluation, Evaluator
 from .models import SolveParams
-from .optimizer import anneal
-from .metaheuristics import run_algorithm
+from .metaheuristics import run_algorithm, run_hybrid_optimizer
 from .os_scheduler import os_schedule
 from .scenario import make_scenario
 from .schedule import Network
@@ -52,6 +51,60 @@ def net() -> Network:
 
 
 def serialize(ev: Evaluation, holds: dict, n: Network) -> dict:
+    conflict_trains: dict[str, dict] = {}
+    conflict_groups: dict[tuple, dict] = {}
+    for conflict in ev.conflicts:
+        for train_id in (conflict.train_a, conflict.train_b):
+            summary = conflict_trains.setdefault(train_id, {
+                "train_id": train_id,
+                "conflict_count": 0,
+                "peers": set(),
+                "tracks": set(),
+                "first_time": conflict.time,
+                "kinds": set(),
+            })
+            peer = conflict.train_b if train_id == conflict.train_a else conflict.train_a
+            summary["conflict_count"] += 1
+            summary["peers"].add(peer)
+            summary["tracks"].add(conflict.track_id)
+            summary["first_time"] = min(summary["first_time"], conflict.time)
+            summary["kinds"].add(conflict.kind)
+
+        bucket = round(conflict.time, 1)
+        group_key = (conflict.track_id, bucket)
+        group = conflict_groups.setdefault(group_key, {
+            "track_id": conflict.track_id,
+            "time": bucket,
+            "trains": set(),
+            "kind": conflict.kind,
+        })
+        group["trains"].update((conflict.train_a, conflict.train_b))
+
+    conflict_summaries = []
+    for train_id in sorted(conflict_trains):
+        summary = conflict_trains[train_id]
+        conflict_summaries.append({
+            "train_id": train_id,
+            "conflict_count": summary["conflict_count"],
+            "peers": sorted(summary["peers"]),
+            "tracks": sorted(summary["tracks"]),
+            "first_time": round(summary["first_time"], 2),
+            "kind": "Head-on" if "head_on" in summary["kinds"] and len(summary["kinds"]) == 1 else "Too close",
+        })
+
+    conflict_group_summaries = [
+        {
+            "track_id": group["track_id"],
+            "time": group["time"],
+            "trains": sorted(group["trains"]),
+            "kind": "Head-on" if group["kind"] == "head_on" else "Too close",
+        }
+        for group in sorted(conflict_groups.values(), key=lambda item: (item["time"], item["track_id"]))
+    ]
+
+    conflicting_ids = set(conflict_trains)
+    clear_trains = sorted(set(n.trains) - conflicting_ids)
+
     return {
         "holds": holds,
         "schedule": [
@@ -72,6 +125,9 @@ def serialize(ev: Evaluation, holds: dict, n: Network) -> dict:
                 for k, v in ev.delays.items()
                 if v > 0
             },
+            "conflict_trains": conflict_summaries,
+            "clear_trains": clear_trains,
+            "conflict_groups": conflict_group_summaries,
         },
         "disturbance": n.delays,
     }
@@ -163,15 +219,43 @@ def solve_optimize(p: SolveParams):
     n = make_scenario(net(), p)
     ev = Evaluator(n, p)
 
-    start = os_schedule(n, p) if p.start_from == "os" else n.zero_holds()
+    os_holds = os_schedule(n, p)
+    os_e = ev.evaluate(os_holds)
 
-    best, best_e, history = anneal(n, ev, start, p)
+    best, best_e, history, method, search_info = run_hybrid_optimizer(
+        n,
+        ev,
+        os_holds,
+        p
+    )
 
     return {
         "start_from": p.start_from,
         "before": serialize(ev.evaluate(n.zero_holds()), n.zero_holds(), n),
         "after": serialize(best_e, best, n),
-        "history": history
+        "history": history,
+        "method": method,
+        "algorithm_history": search_info["algorithm_history"],
+        "algorithm_status": search_info["algorithm_status"],
+        "search_info": search_info,
+        "os_fitness": round(os_e.fitness, 3),
+        "os_conflicts": len(os_e.conflicts),
+        "os_weighted_delay": round(os_e.weighted_delay, 3),
+        "best_os_policy": search_info["best_os_policy"],
+        "best_os_fitness": round(search_info["best_os_fitness"], 3),
+        "best_os_conflicts": search_info["best_os_conflicts"],
+        "best_os_weighted_delay": round(search_info["best_os_weighted_delay"], 3),
+        "optimized_conflicts": len(best_e.conflicts),
+        "optimized_weighted_delay": round(best_e.weighted_delay, 3),
+        "fitness_reduction": round(max(
+            0.0,
+            search_info["best_os_fitness"] - best_e.fitness
+        ), 3),
+        "conflict_reduction": search_info["best_os_conflicts"] - len(best_e.conflicts),
+        "weighted_delay_reduction": round(
+            search_info["best_os_weighted_delay"] - best_e.weighted_delay,
+            3
+        )
     }
 
 
