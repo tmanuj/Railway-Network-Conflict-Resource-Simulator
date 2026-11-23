@@ -1,188 +1,718 @@
+
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8">
+<html lang="en">
+<head>
+<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Railway Conflict Solver</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<title>Railway Network Conflict Simulator</title>
 <style>
-:root{--bg:#0e171d;--pn:#142029;--ln:#25363f;--ink:#e3ecf0;--mut:#7f95a1;--amb:#e9a93a;--red:#ff5d4f;--grn:#46c28a;--blu:#5aa9d6}
+:root {
+  --bg:#08111d;
+  --panel:#101d2c;
+  --line:#26394e;
+  --text:#e8f0fa;
+  --muted:#8da2b9;
+  --blue:#55b7f3;
+  --green:#44d19a;
+  --red:#ff6b72;
+  --amber:#f4b84d;
+}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 Barlow,system-ui,sans-serif}
-header{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--ln)}
-h1{font:700 24px 'Barlow Condensed',sans-serif;margin:0 8px 0 0}
-h2{font:600 17px 'Barlow Condensed',sans-serif;margin:0 0 8px;color:var(--ink)}
-.pill{padding:2px 10px;border-radius:10px;background:var(--pn);border:1px solid var(--ln);color:var(--mut);font-size:13px}
-.pill.ok{color:var(--grn);border-color:var(--grn)}.pill.bad{color:var(--red);border-color:var(--red)}
-.layout{display:grid;grid-template-columns:250px 1fr;gap:16px;padding:16px}
-aside,.card{background:var(--pn);border:1px solid var(--ln);border-radius:8px;padding:14px}
-aside label{display:block;color:var(--mut);font-size:12px;margin-top:8px}
-input,select{width:100%;background:var(--bg);color:var(--ink);border:1px solid var(--ln);border-radius:5px;padding:5px 8px;font:inherit}
-header input{width:230px}
-button{font:600 14px Barlow;background:var(--blu);color:#06141d;border:0;border-radius:5px;padding:7px 12px;cursor:pointer;margin-top:10px;width:100%}
-header button{width:auto;margin:0}
-button.alt{background:transparent;color:var(--ink);border:1px solid var(--ln)}
-button:disabled{opacity:.45;cursor:default}
-button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--amb);outline-offset:2px}
-hr{border:0;border-top:1px solid var(--ln);margin:14px 0}
-#msg{margin-top:10px;color:var(--mut);font-size:13px;white-space:pre-wrap}
-#msg.err{color:var(--red)}
-.tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
-.tabs button{width:auto;margin:0;background:var(--pn);color:var(--mut);border:1px solid var(--ln)}
-.tabs button.on{color:var(--ink);border-color:var(--blu);box-shadow:inset 0 -3px var(--blu)}
-.card{margin-bottom:14px}
-svg{width:100%;height:auto;display:block}
-.ax{fill:var(--mut);font-size:9px}.lb{fill:var(--ink);font-size:10px}
-.row{display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap}
-.row input[type=range]{flex:1;min-width:160px;padding:0}
-.row button{margin:0;width:auto}.row select{width:auto}
-.num{font-variant-numeric:tabular-nums}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 Arial,sans-serif}
+header{padding:18px 24px;background:#0b1725;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+header h1{font-size:20px;margin:0;flex:1}
+header input{width:220px}
+.layout{display:grid;grid-template-columns:290px minmax(0,1fr);gap:18px;padding:18px;max-width:1800px;margin:auto}
+aside,.card{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:17px}
+aside{align-self:start;position:sticky;top:12px;max-height:96vh;overflow:auto}
+h2{font-size:16px;margin:0 0 12px}
+label{display:block;color:var(--muted);font-size:12px;margin:12px 0 5px}
+input,select{width:100%;background:#091522;border:1px solid var(--line);border-radius:7px;padding:10px;color:white}
+button{background:var(--blue);border:0;border-radius:7px;padding:11px;cursor:pointer;color:#061521;font-weight:bold}
+aside button{width:100%;margin-top:12px}
+button.secondary,.tabs button{background:#1c344a;color:white}
+button:disabled{opacity:.5;cursor:wait}
+hr{border:0;border-top:1px solid var(--line);margin:19px 0}
+.card{margin-bottom:17px;overflow:auto}
+.small{font-size:12px;color:var(--muted)}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:18px}
+.metric{background:#142438;border:1px solid var(--line);border-radius:10px;padding:16px}
+.metric span{font-size:12px;color:var(--muted)}
+.metric strong{display:block;font-size:25px;margin-top:6px}
+.tabs{display:flex;gap:8px;margin-bottom:15px;flex-wrap:wrap}
+.tabs button.active{background:var(--blue);color:#061521}
+#network,#timeline{background:#0b1b2a;border-radius:9px;min-height:170px;overflow:auto}
+#network svg,#timeline svg{display:block;width:100%;min-width:620px;height:auto}
 table{width:100%;border-collapse:collapse}
-th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--ln);font-size:13px}
-th{color:var(--mut);font-weight:500}
-td.g{color:var(--grn);font-weight:600}
-tr.click{cursor:pointer}tr.click:hover{background:#1b2c36}
-.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.chip{display:inline-block;margin:2px 4px 2px 0;padding:0 8px;border-radius:9px;background:var(--bg);border:1px solid var(--ln);font-size:12px}
-.bar{height:8px;background:var(--bg);border-radius:4px;min-width:60px}.bar i{display:block;height:100%;background:var(--amb);border-radius:4px}
-.leg{color:var(--mut);font-size:12px;margin-top:6px}
-@media(max-width:900px){.layout{grid-template-columns:1fr}.two{grid-template-columns:1fr}}
-</style></head><body>
-<header><h1>Railway Conflict Solver</h1><span id="st" class="pill">not connected</span>
-<input id="api" value="http://localhost:8000" aria-label="API address"><button id="conn">Connect</button></header>
+th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;font-size:12px}
+th{color:var(--muted)}
+.success{color:var(--green)}
+.error{color:var(--red)}
+.warning{color:var(--amber)}
+#status{background:#142438;border-radius:7px;padding:11px;margin-top:14px;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--amber)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:17px}
+.row{display:flex;gap:12px;align-items:center;margin-top:12px}
+.row input{flex:1}
+.pill{border:1px solid var(--line);border-radius:20px;padding:6px 12px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:10px}
+.dot{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px}
+.bar{height:9px;background:#091522;border-radius:5px;overflow:hidden;min-width:90px}
+.bar div{height:100%;background:var(--blue)}
+@media(max-width:1100px){.metrics{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}}
+@media(max-width:750px){.layout{grid-template-columns:1fr}aside{position:static;max-height:none}}
+</style>
+</head>
+<body>
+
+<header>
+<h1>🚆 Railway Network Conflict Simulator</h1>
+<span id="connection" class="pill">Disconnected</span>
+<input id="api" value="http://127.0.0.1:8000">
+<button id="connectBtn">Connect API</button>
+</header>
+
 <div class="layout">
 <aside>
- <h2>Scenario</h2>
- <label>Trains to delay</label><input id="dc" type="number" value="6" min="0">
- <label>Random seed</label><input id="ds" type="number" value="1">
- <label>Minimum gap between trains (min)</label><input id="hw" type="number" value="2" step="0.5">
- <button id="bBase">Show conflicts</button>
- <div id="dist" style="margin-top:8px"></div>
- <hr><h2>Solver</h2>
- <label>OS scheduling policy</label><select id="pol"><option value="priority">Priority first</option><option value="fcfs">First come, first served</option><option value="sjf">Shortest journey first</option></select>
- <button id="bOS">Run OS scheduler</button>
- <label>Optimizer starts from</label><select id="sf"><option value="os">OS scheduler result</option><option value="planned">Delayed timetable</option></select>
- <label>Iterations</label><input id="it" type="number" value="3000" step="500">
- <button id="bOpt">Run optimizer</button>
- <div id="msg">Connect to the API to start.</div>
+<h2>Scenario Settings</h2>
+<label>Number of disturbed trains</label>
+<input id="disturbCount" type="number" value="6" min="0">
+<label>Random seed</label>
+<input id="seed" type="number" value="1">
+<label>Minimum headway (minutes)</label>
+<input id="headway" type="number" value="2" min="0" step="0.5">
+<button id="baselineBtn">Show Baseline Conflicts</button>
+
+<hr>
+<h2>OS Scheduling</h2>
+<label>Scheduling Algorithm</label>
+
+<select id="policy">
+    <option value="priority">Priority Scheduling</option>
+    <option value="fcfs">FCFS</option>
+    <option value="sjf">SJF</option>
+    <option value="rr">Round Robin (RR)</option>
+</select>
+
+<option value="priority">Priority Scheduling</option>
+<option value="fcfs">FCFS</option>
+<option value="sjf">SJF</option>
+<option value="rr">Round Robin</option>
+</select>
+<button id="osBtn">Run OS Scheduler</button>
+
+<hr>
+<h2>Optimization</h2>
+<label>Optimizer Starts From</label>
+<select id="startFrom">
+<option value="os">OS Scheduler Result</option>
+<option value="planned">Delayed Timetable</option>
+</select>
+<label>Select Optimization Algorithm</label>
+<select id="algorithm">
+<option value="pso">PSO - Particle Swarm Optimization</option>
+<option value="ga">GA - Genetic Algorithm</option>
+<option value="aco">ACO - Ant Colony Optimization</option>
+<option value="abc">ABC - Artificial Bee Colony</option>
+</select>
+<label>Iterations</label>
+<input id="iterations" type="number" value="30" min="1" max="3000">
+<button id="optBtn">Run Selected Optimizer</button>
+<div id="status">Connecting...</div>
 </aside>
+
 <main>
- <div class="tabs" id="tabs">
-  <button data-v="before" class="on">Before: delayed timetable</button>
-  <button data-v="os" disabled>After OS scheduler</button>
-  <button data-v="opt" disabled>After optimizer</button>
- </div>
- <div class="card"><h2>Network and trains</h2><div id="map"></div>
-  <div class="row"><button id="play" class="alt">Play</button><input id="tm" type="range" min="0" max="1" value="0" aria-label="Time"><b id="tl" class="num"></b></div>
-  <div class="leg">Red = track with a conflict (number = count). Amber = single track, grey = double track. Dots are trains, ringed red when in conflict.</div></div>
- <div class="card"><div class="row" style="margin:0 0 6px"><h2 style="margin:0">Time-distance chart</h2>
-  <select id="span"><option value="120">2 hours</option><option value="240" selected>4 hours</option><option value="480">8 hours</option></select></div>
-  <div id="chart"></div>
-  <div class="leg">Each line is a train. Red lines are in conflict, dashed lines were delayed at departure, red circles mark where two trains need the same track. Brighter lines have higher priority.</div></div>
- <div class="two"><div class="card"><h2>Before and after</h2><div id="kpi"></div></div>
-  <div class="card"><h2>Optimizer progress</h2><div id="fit"></div></div></div>
- <div class="two"><div class="card"><h2>Conflicts in this view</h2><div id="cl"></div></div>
-  <div class="card"><h2>Delay added by the solver</h2><div id="dl"></div></div></div>
-</main></div>
+<h2>Network Dashboard</h2>
+<p class="small">Railway operations, track conflicts and intelligent scheduling</p>
+
+<section class="metrics">
+<div class="metric"><span>Total Trains</span><strong id="totalTrains">—</strong></div>
+<div class="metric"><span>Track Conflicts</span><strong id="totalConflicts">—</strong></div>
+<div class="metric"><span>Added Delay</span><strong id="totalDelay">—</strong></div>
+<div class="metric"><span>Network Status</span><strong id="networkStatus">Offline</strong></div>
+</section>
+
+<div class="tabs">
+<button id="beforeTab" class="active">Before Scheduling</button>
+<button id="osTab">After OS Scheduler</button>
+<button id="optTab">After Optimizer</button>
+</div>
+
+<div class="card">
+<h2>Railway Network & Conflict Locations</h2>
+<div id="network"></div>
+<div class="legend">
+<span><i class="dot" style="background:#ff6b72"></i>Conflict track</span>
+<span><i class="dot" style="background:#f4b84d"></i>Single track</span>
+<span><i class="dot" style="background:#647e91"></i>Normal track</span>
+</div>
+<div class="row">
+<button id="playBtn" class="secondary">Play</button>
+<input id="timeSlider" type="range" min="0" max="100" value="0">
+<span id="timeLabel">00:00</span>
+</div>
+<p class="small">Red labels indicate the total detected conflict events on each track in the selected schedule. Hover over a track for details.</p>
+</div>
+
+<div class="card">
+<h2>Track-by-Track Conflict Summary</h2>
+<div id="trackConflicts"></div>
+</div>
+
+<div class="card">
+<h2>Time-Distance Analysis</h2>
+<div id="timeline"></div>
+</div>
+
+<div class="grid2">
+<div class="card">
+<h2>Before & After Performance</h2>
+<div id="performance"></div>
+</div>
+<div class="card">
+<h2>Optimizer Convergence</h2>
+<div id="convergence"></div>
+</div>
+</div>
+
+<div class="grid2">
+<div class="card">
+<h2>Conflict Event Log</h2>
+<div id="conflictLog"></div>
+</div>
+<div class="card">
+<h2>Delay Distribution</h2>
+<div id="delayDistribution"></div>
+</div>
+</div>
+</main>
+</div>
+
 <script>
 const $=id=>document.getElementById(id);
-const S={net:null,tr:[],by:{},trk:{},p:{},xy:{},res:{},hist:[],view:'before',t:0,key:'',lo:0,hi:1};
-const PC={1:'#587585',2:'#6aa3c4',3:'#6fcab0',4:'#d8c866',5:'#f4f7f8'};
-const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const API=()=>$('api').value.replace(/\/$/,'');
-async function call(path,body){const r=await fetch(API()+path,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:undefined);if(!r.ok)throw new Error((await r.text()).slice(0,300));return r.json()}
-const fmt=m=>{m=Math.round(m);const d=Math.floor(m/1440)+1,x=((m%1440)+1440)%1440;return (d>1?'D'+d+' ':'')+String(Math.floor(x/60)).padStart(2,'0')+':'+String(x%60).padStart(2,'0')};
-const say=(t,e)=>{$('msg').textContent=t;$('msg').className=e?'err':''};
-const cur=()=>S.res[S.view];
-const bad=R=>new Set(R?R.conflicts.flatMap(c=>[c.train_a,c.train_b]):[]);
-const params=()=>({headway_min:+$('hw').value,disturb_count:+$('dc').value,disturb_seed:+$('ds').value,policy:$('pol').value,start_from:$('sf').value,iterations:+$('it').value});
+const state={
+ network:null,trains:[],results:{},view:"before",
+ history:[],positions:{},currentTime:0,minTime:0,maxTime:100,
+ timer:null,scenarioKey:"",algorithm:""
+};
+const colors=["#55b7f3","#44d19a","#f4b84d","#a995ff","#e8f0fa","#ff9e80"];
+const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({
+ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+}[c]));
+const num=v=>Number(v)||0;
+const fmt=v=>num(v).toFixed(2);
+const asArray=v=>Array.isArray(v)?v:Object.values(v||{});
+
+function timeText(minutes){
+ if(!Number.isFinite(Number(minutes)))return "—";
+ const total=Math.floor(Number(minutes));
+ const day=Math.floor(total/1440);
+ const m=((total%1440)+1440)%1440;
+ return (day>0?"D"+(day+1)+" ":"")+
+  String(Math.floor(m/60)).padStart(2,"0")+":"+
+  String(m%60).padStart(2,"0");
+}
+
+function setStatus(message,error=false){
+ $("status").textContent=message;
+ $("status").style.color=error?"#ff6b72":"#44d19a";
+}
+
+function getParams(){
+ return {
+  headway_min:num($("headway").value),
+  disturb_count:num($("disturbCount").value),
+  disturb_seed:num($("seed").value),
+  policy:$("policy").value,
+  start_from:$("startFrom").value,
+  iterations:num($("iterations").value)
+ };
+}
+
+function scenarioKey(p){
+ return [p.headway_min,p.disturb_count,p.disturb_seed,p.policy].join("|");
+}
+
+function resetIfChanged(){
+ const key=scenarioKey(getParams());
+ if(key!==state.scenarioKey){
+  state.results={};
+  state.history=[];
+  state.scenarioKey=key;
+ }
+}
+
+async function api(path,body=null){
+ const base=$("api").value.replace(/\/+$/,"");
+ const options=body===null?{}:{
+  method:"POST",
+  headers:{"Content-Type":"application/json"},
+  body:JSON.stringify(body)
+ };
+ const response=await fetch(base+path,options);
+ const raw=await response.text();
+ let data;
+ try{data=JSON.parse(raw)}catch{data={detail:raw}}
+ if(!response.ok){
+  const detail=data.detail||data.message||raw;
+  throw new Error("HTTP "+response.status+": "+
+   (typeof detail==="string"?detail:JSON.stringify(detail)));
+ }
+ return data;
+}
+
+async function busy(label,task){
+ const buttons=document.querySelectorAll("button");
+ buttons.forEach(b=>b.disabled=true);
+ setStatus(label);
+ try{
+  await task();
+  if($("status").textContent===label)setStatus("Completed successfully.");
+ }catch(error){
+  console.error(error);
+  setStatus(error.message||String(error),true);
+ }finally{
+  buttons.forEach(b=>b.disabled=false);
+  render();
+ }
+}
+
+function activeResult(){return state.results[state.view]||null}
+function scheduleList(result){return asArray(result?.schedule)}
+function stepList(train){return asArray(train?.steps)}
+
+function updateTimeRange(){
+ let low=Infinity,high=-Infinity;
+ Object.values(state.results).forEach(result=>{
+  scheduleList(result).forEach(train=>{
+   stepList(train).forEach(step=>{
+    low=Math.min(low,num(step.enter));
+    high=Math.max(high,num(step.exit));
+   });
+  });
+ });
+ if(!Number.isFinite(low)||!Number.isFinite(high)){low=0;high=100}
+ state.minTime=Math.floor(low);
+ state.maxTime=Math.ceil(Math.max(high,low+1));
+ $("timeSlider").min=state.minTime;
+ $("timeSlider").max=state.maxTime;
+ state.currentTime=Math.max(state.minTime,Math.min(state.maxTime,state.currentTime));
+ $("timeSlider").value=state.currentTime;
+}
+
+function setView(view){
+ if(!state.results[view])return;
+ state.view=view;
+ updateTimeRange();
+ render();
+}
+
+function renderMetrics(){
+ const m=activeResult()?.metrics;
+ $("totalTrains").textContent=state.trains.length||"—";
+ $("totalConflicts").textContent=m?m.conflicts:"—";
+ $("totalDelay").textContent=m?fmt(m.solver_delay_min)+" min":"—";
+ $("networkStatus").textContent=state.network?"Online":"Offline";
+ $("networkStatus").style.color=state.network?"#44d19a":"#ff6b72";
+ ["before","os","opt"].forEach(view=>{
+  const tab=$(view+"Tab");
+  tab.classList.toggle("active",state.view===view);
+  tab.disabled=!state.results[view];
+ });
+ $("timeLabel").textContent=timeText(state.currentTime);
+}
+
+function buildPositions(){
+ if(!state.network)return;
+ const stations=asArray(state.network.stations);
+ const tracks=asArray(state.network.tracks);
+ const adj={};
+ stations.forEach(s=>adj[s.id]=[]);
+ tracks.forEach(t=>{
+  (adj[t.a]||=[]).push(t.b);
+  (adj[t.b]||=[]).push(t.a);
+ });
+ const longest=[...state.trains].sort(
+  (a,b)=>(b.route?.length||0)-(a.route?.length||0)
+ )[0];
+ const route=longest?.route||stations.map(s=>s.id);
+ const pos={};
+ route.forEach((id,i)=>pos[id]=[65+i*100,170]);
+ let extra=0;
+ stations.forEach(s=>{
+  if(pos[s.id])return;
+  const anchor=(adj[s.id]||[]).find(id=>pos[id]);
+  if(anchor){
+   const a=pos[anchor];
+   const offset=extra%2===0?-1:1;
+   pos[s.id]=[
+    a[0]+((extra%3)-1)*35,
+    a[1]+offset*(60+Math.floor(extra/2)*18)
+   ];
+  }else{
+   pos[s.id]=[65+(extra%7)*110,55+Math.floor(extra/7)*50];
+  }
+  extra++;
+ });
+ const values=Object.values(pos);
+ if(!values.length)return;
+ const xs=values.map(p=>p[0]),ys=values.map(p=>p[1]);
+ const minX=Math.min(...xs),maxX=Math.max(...xs);
+ const minY=Math.min(...ys),maxY=Math.max(...ys);
+ state.positions=Object.fromEntries(Object.entries(pos).map(([id,[x,y]])=>[
+  id,[
+   45+(x-minX)/Math.max(1,maxX-minX)*810,
+   45+(y-minY)/Math.max(1,maxY-minY)*250
+  ]
+ ]));
+}
+
+function conflictCounts(result){
+ const counts=new Map();
+ asArray(result?.conflicts).forEach(c=>{
+  const id=String(c.track_id??"");
+  if(id)counts.set(id,(counts.get(id)||0)+1);
+ });
+ return counts;
+}
+
+function conflictTrainSet(result){
+ const set=new Set();
+ asArray(result?.conflicts).forEach(c=>{
+  set.add(c.train_a);
+  set.add(c.train_b);
+ });
+ return set;
+}
+
+function trainPosition(train,time){
+ const steps=stepList(train);
+ for(let i=0;i<steps.length;i++){
+  const s=steps[i],a=state.positions[s.frm],b=state.positions[s.to];
+  if(!a||!b)continue;
+  if(time>=s.enter&&time<=s.exit){
+   const fraction=Math.max(0,Math.min(1,
+    (time-s.enter)/Math.max(.001,s.exit-s.enter)));
+   return [
+    a[0]+(b[0]-a[0])*fraction,
+    a[1]+(b[1]-a[1])*fraction
+   ];
+  }
+  if(i<steps.length-1&&time>s.exit&&time<steps[i+1].enter)return b;
+ }
+ return null;
+}
+
+function renderNetwork(){
+ if(!state.network){
+  $("network").innerHTML="<p>No network loaded.</p>";
+  return;
+ }
+ const result=activeResult();
+ const counts=conflictCounts(result);
+ const badTrains=conflictTrainSet(result);
+ let svg='<svg viewBox="0 0 900 360" xmlns="http://www.w3.org/2000/svg">';
+
+ asArray(state.network.tracks).forEach(t=>{
+  const a=state.positions[t.a],b=state.positions[t.b];
+  if(!a||!b)return;
+  const count=counts.get(String(t.id))||0;
+  const color=count>0?"#ff6b72":t.single_track?"#f4b84d":"#647e91";
+  const mx=(a[0]+b[0])/2,my=(a[1]+b[1])/2;
+  svg+=`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}"
+   y2="${b[1]}" stroke="${color}" stroke-width="${count?6:3}"
+   stroke-linecap="round">
+   <title>${esc(t.a)} to ${esc(t.b)} | ${count} conflicts</title>
+   </line>`;
+  if(count>0){
+   svg+=`<rect x="${mx-15}" y="${my-14}" width="30" height="22"
+    rx="6" fill="#ff6b72" stroke="#08111d" stroke-width="1.5"/>
+    <text x="${mx}" y="${my+1}" fill="#08111d"
+    font-size="12" font-weight="bold" text-anchor="middle">${count}</text>`;
+  }
+ });
+
+ asArray(state.network.stations).forEach(s=>{
+  const p=state.positions[s.id];
+  if(!p)return;
+  svg+=`<circle cx="${p[0]}" cy="${p[1]}" r="6"
+   fill="#08111d" stroke="#e8f0fa" stroke-width="2"/>
+   <text x="${p[0]}" y="${p[1]-13}" fill="#e8f0fa"
+   font-size="11" text-anchor="middle">${esc(s.id)}</text>`;
+ });
+
+ scheduleList(result).forEach((train,i)=>{
+  const p=trainPosition(train,state.currentTime);
+  if(!p)return;
+  const color=badTrains.has(train.train_id)?"#ff6b72":colors[i%colors.length];
+  svg+=`<circle cx="${p[0]}" cy="${p[1]}" r="5"
+   fill="${color}" stroke="#08111d" stroke-width="1.5">
+   <title>${esc(train.train_id)}</title></circle>`;
+ });
+
+ $("network").innerHTML=svg+"</svg>";
+}
+
+function renderTrackConflicts(){
+ const result=activeResult();
+ const counts=conflictCounts(result);
+ const tracks=asArray(state.network?.tracks);
+ if(!result){
+  $("trackConflicts").innerHTML="<p>No schedule loaded.</p>";
+  return;
+ }
+ const active=tracks.filter(t=>(counts.get(String(t.id))||0)>0)
+  .sort((a,b)=>(counts.get(String(b.id))||0)-(counts.get(String(a.id))||0));
+ if(!active.length){
+  $("trackConflicts").innerHTML='<p class="success">No track conflicts in this schedule.</p>';
+  return;
+ }
+ let html="<table><tr><th>From Station</th><th>To Station</th><th>Track</th><th>Conflicts</th></tr>";
+ active.forEach(t=>{
+  html+=`<tr><td>${esc(t.a)}</td><td>${esc(t.b)}</td>
+   <td>${esc(t.id)}</td>
+   <td class="error">${counts.get(String(t.id))}</td></tr>`;
+ });
+ $("trackConflicts").innerHTML=html+"</table>";
+}
+
+function renderTimeline(){
+ const result=activeResult();
+ const schedules=scheduleList(result);
+ if(!schedules.length){
+  $("timeline").innerHTML="<p>No schedule available.</p>";
+  return;
+ }
+ const width=900,height=350,left=65,top=25,right=20,bottom=35;
+ const stations=[...new Set(state.trains.flatMap(t=>t.route||[]))];
+ if(!stations.length){
+  $("timeline").innerHTML="<p>No route data available.</p>";
+  return;
+ }
+ const index=Object.fromEntries(stations.map((s,i)=>[s,i]));
+ const X=t=>left+(t-state.minTime)/
+  Math.max(1,state.maxTime-state.minTime)*(width-left-right);
+ const Y=id=>top+num(index[id])/
+  Math.max(1,stations.length-1)*(height-top-bottom);
+ const bad=conflictTrainSet(result);
+ let svg=`<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">`;
+ stations.forEach(id=>{
+  const y=Y(id);
+  svg+=`<line x1="${left}" y1="${y}" x2="${width-right}"
+   y2="${y}" stroke="#26394e"/>
+   <text x="${left-7}" y="${y+4}" text-anchor="end"
+   fill="#8da2b9" font-size="10">${esc(id)}</text>`;
+ });
+ schedules.forEach((train,i)=>{
+  const points=[];
+  stepList(train).forEach(s=>{
+   points.push([X(s.enter),Y(s.frm)]);
+   points.push([X(s.exit),Y(s.to)]);
+  });
+  if(points.length<2)return;
+  const color=bad.has(train.train_id)?"#ff6b72":colors[i%colors.length];
+  svg+=`<polyline fill="none" stroke="${color}" stroke-width="1.8"
+   points="${points.map(p=>p.join(",")).join(" ")}">
+   <title>${esc(train.train_id)}</title></polyline>`;
+ });
+ svg+=`<line x1="${X(state.currentTime)}" y1="${top}"
+  x2="${X(state.currentTime)}" y2="${height-bottom}"
+  stroke="#f4b84d" stroke-width="2"/>`;
+ $("timeline").innerHTML=svg+"</svg>";
+}
+
+function renderPerformance(){
+ const views=[
+  ["before","Before"],
+  ["os","OS Scheduler"],
+  ["opt",state.algorithm?state.algorithm.toUpperCase():"Optimizer"]
+ ];
+ let html="<table><tr><th>Stage</th><th>Conflicts</th><th>Delay (min)</th><th>Fitness</th></tr>";
+ views.forEach(([key,label])=>{
+  const m=state.results[key]?.metrics;
+  if(!m)return;
+  html+=`<tr><td>${esc(label)}</td>
+   <td class="${num(m.conflicts)===0?"success":"error"}">${esc(m.conflicts)}</td>
+   <td>${fmt(m.solver_delay_min)}</td>
+   <td>${fmt(m.fitness)}</td></tr>`;
+ });
+ html+="</table>";
+ const os=state.results.os?.metrics,opt=state.results.opt?.metrics;
+ if(os&&opt){
+  const saved=num(os.solver_delay_min)-num(opt.solver_delay_min);
+  if(num(opt.conflicts)>0){
+   html+=`<p class="error">Optimizer has ${opt.conflicts} remaining conflicts.</p>`;
+  }else if(num(os.conflicts)>0){
+   html+='<p class="warning">OS schedule contains conflicts. Compare fitness as well as delay.</p>';
+  }else if(saved>0.000001){
+   html+=`<p class="success">Optimizer reduced delay by ${fmt(saved)} minutes.</p>`;
+  }else if(Math.abs(saved)<0.000001){
+   html+='<p class="warning">No delay improvement found. Identical results are possible when the OS schedule is already locally optimal.</p>';
+  }else{
+   html+=`<p class="warning">Optimizer delay is ${fmt(-saved)} minutes higher.</p>`;
+  }
+ }
+ $("performance").innerHTML=html;
+}
+
+function renderConvergence(){
+ const values=asArray(state.history).map(h=>{
+  if(typeof h==="number")return h;
+  if(Array.isArray(h))return Number(h[h.length-1]);
+  return Number(h.best??h.fitness??h.best_fitness??NaN);
+ }).filter(Number.isFinite);
+ if(!values.length){
+  $("convergence").innerHTML="<p>No convergence history available.</p>";
+  return;
+ }
+ const min=Math.min(...values),max=Math.max(...values);
+ const points=values.map((v,i)=>{
+  const x=35+i/Math.max(1,values.length-1)*825;
+  const y=140-(v-min)/Math.max(.001,max-min)*115;
+  return x+","+y;
+ }).join(" ");
+ $("convergence").innerHTML=`
+ <svg viewBox="0 0 900 170" style="width:100%">
+ <polyline points="${points}" fill="none" stroke="#44d19a" stroke-width="3"/>
+ <text x="10" y="20" fill="#8da2b9" font-size="12">Best fitness</text>
+ <text x="10" y="160" fill="#8da2b9" font-size="12">Iterations</text>
+ </svg><p>Final recorded fitness: ${fmt(values[values.length-1])}</p>`;
+}
+
+function renderConflicts(){
+ const conflicts=asArray(activeResult()?.conflicts);
+ if(!conflicts.length){
+  $("conflictLog").innerHTML='<p class="success">No conflicts detected.</p>';
+  return;
+ }
+ let html="<table><tr><th>Time</th><th>Track</th><th>Trains</th><th>Overlap</th></tr>";
+ conflicts.slice(0,100).forEach(c=>{
+  html+=`<tr><td>${timeText(c.time)}</td>
+   <td>${esc(c.track_id)}</td>
+   <td>${esc(c.train_a)} / ${esc(c.train_b)}</td>
+   <td>${fmt(c.overlap_min)} min</td></tr>`;
+ });
+ $("conflictLog").innerHTML=html+"</table>";
+}
+
+function renderDelays(){
+ const delays=activeResult()?.metrics?.delay_by_train||{};
+ const entries=Object.entries(delays).sort((a,b)=>num(b[1])-num(a[1])).slice(0,10);
+ if(!entries.length){
+  $("delayDistribution").innerHTML="<p>No delay information available.</p>";
+  return;
+ }
+ const max=Math.max(1,...entries.map(e=>num(e[1])));
+ let html="<table>";
+ entries.forEach(([train,delay])=>{
+  html+=`<tr><td>${esc(train)}</td><td>${fmt(delay)} min</td>
+   <td><div class="bar"><div style="width:${Math.min(100,num(delay)/max*100)}%"></div></div></td></tr>`;
+ });
+ $("delayDistribution").innerHTML=html+"</table>";
+}
+
+function render(){
+ renderMetrics();
+ renderNetwork();
+ renderTrackConflicts();
+ renderTimeline();
+ renderPerformance();
+ renderConvergence();
+ renderConflicts();
+ renderDelays();
+}
 
 async function connect(){
- try{const h=await call('/api/health');
-  if(!h.ok){$('st').textContent='API up, network not loaded';$('st').className='pill bad';say(h.error,1);return}
-  $('st').textContent=`connected: ${h.counts.stations} stations, ${h.counts.tracks} tracks, ${h.counts.trains} trains`;$('st').className='pill ok';
-  S.net=await call('/api/network');S.tr=await call('/api/trains');
-  S.by=Object.fromEntries(S.tr.map(t=>[t.id,t]));S.trk=Object.fromEntries(S.net.tracks.map(t=>[t.id,t]));
-  layout();await runBase();
- }catch(e){$('st').textContent='cannot reach API';$('st').className='pill bad';say(String(e.message||e),1)}}
+ await busy("Connecting to FastAPI and Neo4j...",async()=>{
+  const health=await api("/api/health");
+  if(health.ok===false)throw new Error(health.error||"Backend not ready");
+  state.network=await api("/api/network");
+  state.trains=asArray(await api("/api/trains"));
+  buildPositions();
+  $("connection").textContent="Connected";
+  $("connection").style.color="#44d19a";
+  await loadBaseline();
+ });
+}
 
-function layout(){
- const adj={};S.net.tracks.forEach(t=>{(adj[t.a]=adj[t.a]||[]).push(t.b);(adj[t.b]=adj[t.b]||[]).push(t.a)});
- const spine=S.tr.reduce((a,b)=>b.route.length>a.route.length?b:a).route,p={},o={};
- spine.forEach((c,i)=>{p[c]=i;o[c]=0});let f=1;
- for(let k=0;k<30;k++)S.net.stations.forEach(({id:c})=>{if(c in p)return;const nb=(adj[c]||[]).filter(n=>n in p);if(!nb.length)return;
-  p[c]=nb.reduce((s,n)=>s+p[n],0)/nb.length+(nb.length<2?.4:0);o[c]=Math.max(-2,Math.min(2,(o[nb[0]]||0)+(f=-f)))});
- S.net.stations.forEach(({id:c})=>{if(!(c in p)){p[c]=0;o[c]=2}});
- const mx=Math.max(...Object.values(p))||1;S.p=p;
- S.xy=Object.fromEntries(Object.keys(p).map(c=>[c,[40+p[c]/mx*820,125+o[c]*42]]))}
+async function loadBaseline(){
+ const p=getParams();
+ state.results={};
+ state.history=[];
+ state.scenarioKey=scenarioKey(p);
+ const query=new URLSearchParams({
+  headway_min:String(p.headway_min),
+  disturb_count:String(p.disturb_count),
+  disturb_seed:String(p.disturb_seed)
+ });
+ const result=await api("/api/baseline?"+query);
+ state.results.before=result;
+ state.view="before";
+ updateTimeRange();
+ state.currentTime=state.minTime;
+}
 
-function range(){let lo=1e9,hi=-1e9;Object.values(S.res).forEach(R=>R.schedule.forEach(s=>s.steps.forEach(x=>{lo=Math.min(lo,x.enter);hi=Math.max(hi,x.exit)})));
- S.lo=Math.floor(lo);S.hi=Math.ceil(hi);const t=$('tm');t.min=S.lo;t.max=S.hi}
-function setT(v){S.t=Math.max(S.lo,Math.min(S.hi,v));$('tm').value=S.t;draw()}
+async function runOS(){
+ await busy("Running OS scheduler...",async()=>{
+  resetIfChanged();
+  const result=await api("/api/solve/os",getParams());
+  state.results.before=result.before;
+  state.results.os=result.after;
+  delete state.results.opt;
+  state.history=[];
+  state.view="os";
+  updateTimeRange();
+ });
+}
 
-function drawMap(){
- const R=cur(),b=bad(R),cc={};(R?R.conflicts:[]).forEach(c=>cc[c.track_id]=(cc[c.track_id]||0)+1);
- let s='<svg viewBox="0 0 900 250">';
- S.net.tracks.forEach(t=>{const a=S.xy[t.a],c=S.xy[t.b];if(!a||!c)return;
-  if(t.single_track)s+=`<line x1="${a[0]}" y1="${a[1]}" x2="${c[0]}" y2="${c[1]}" stroke="var(--amb)" stroke-width="2.5"/>`;
-  else s+=`<line x1="${a[0]}" y1="${a[1]}" x2="${c[0]}" y2="${c[1]}" stroke="#5d7482" stroke-width="7"/><line x1="${a[0]}" y1="${a[1]}" x2="${c[0]}" y2="${c[1]}" stroke="var(--pn)" stroke-width="2.5"/>`;
-  if(cc[t.id])s+=`<line x1="${a[0]}" y1="${a[1]}" x2="${c[0]}" y2="${c[1]}" stroke="var(--red)" stroke-width="5" opacity=".85"/><text x="${(a[0]+c[0])/2}" y="${(a[1]+c[1])/2-8}" text-anchor="middle" fill="var(--red)" font-weight="700" font-size="13">${cc[t.id]}</text>`});
- S.net.stations.forEach(({id:c,name})=>{const [x,y]=S.xy[c],up=Math.round(S.p[c]*2)%2;
-  s+=`<circle cx="${x}" cy="${y}" r="4.5" fill="var(--bg)" stroke="var(--ink)" stroke-width="1.5"><title>${esc(name)}</title></circle><text class="lb" x="${x}" y="${y+(up?-10:18)}" text-anchor="middle">${c}</text>`});
- if(R)R.schedule.forEach(sc=>{const st=sc.steps;let pt=null;
-  for(let i=0;i<st.length;i++){const q=st[i];
-   if(S.t>=q.enter&&S.t<=q.exit){const f=(S.t-q.enter)/Math.max(q.exit-q.enter,1e-6),a=S.xy[q.frm],c=S.xy[q.to];pt=[a[0]+(c[0]-a[0])*f,a[1]+(c[1]-a[1])*f];break}
-   if(i<st.length-1&&S.t>q.exit&&S.t<st[i+1].enter){pt=S.xy[q.to];break}}
-  if(pt){const t=S.by[sc.train_id]||{};s+=`<circle cx="${pt[0]}" cy="${pt[1]}" r="${b.has(sc.train_id)?5.5:4}" fill="${PC[t.priority||2]}" stroke="${b.has(sc.train_id)?'var(--red)':'var(--bg)'}" stroke-width="2"><title>${sc.train_id} ${esc(t.name||'')}</title></circle>`}});
- $('map').innerHTML=s+'</svg>'}
+async function runOptimizer(){
+ await busy("Running selected optimization algorithm...",async()=>{
+  resetIfChanged();
+  const p=getParams();
+  const name=$("algorithm").value;
+  const result=await api(
+   "/api/solve/algorithm/"+encodeURIComponent(name),p
+  );
+  state.results.before=result.baseline||result.before;
+  if(p.start_from==="os")state.results.os=result.before;
+  else delete state.results.os;
+  state.results.opt=result.after;
+  state.history=result.history||[];
+  state.algorithm=name;
+  state.view="opt";
+  updateTimeRange();
+ });
+}
 
-function drawChart(){
- const R=cur(),W=900,H=380,L=44,Rr=10,T=8,B=22,span=+$('span').value,t0=S.t-span/2,X=m=>L+(m-t0)/span*(W-L-Rr);
- const mx=Math.max(...Object.values(S.p))||1,Y=p=>T+p/mx*(H-T-B),b=bad(R);
- let s=`<svg viewBox="0 0 ${W} ${H}"><defs><clipPath id="cp"><rect x="${L}" y="${T}" width="${W-L-Rr}" height="${H-T-B}"/></clipPath></defs>`;
- Object.entries(S.p).forEach(([c,p])=>s+=`<line x1="${L}" x2="${W-Rr}" y1="${Y(p)}" y2="${Y(p)}" stroke="var(--ln)"/><text class="ax" x="${L-4}" y="${Y(p)+3}" text-anchor="end">${c}</text>`);
- const stp=span>360?60:30;for(let m=Math.ceil(t0/stp)*stp;m<=t0+span;m+=stp)s+=`<line x1="${X(m)}" x2="${X(m)}" y1="${T}" y2="${H-B}" stroke="var(--ln)" stroke-dasharray="2 4"/><text class="ax" x="${X(m)}" y="${H-7}" text-anchor="middle">${fmt(m)}</text>`;
- if(R){s+='<g clip-path="url(#cp)">';
-  [false,true].forEach(pass=>R.schedule.forEach(sc=>{if(b.has(sc.train_id)!==pass)return;
-   const pts=sc.steps.flatMap(q=>[[q.enter,S.p[q.frm]],[q.exit,S.p[q.to]]]);
-   if(pts[pts.length-1][0]<t0||pts[0][0]>t0+span)return;
-   const t=S.by[sc.train_id]||{},d=R.disturbance&&R.disturbance[sc.train_id];
-   s+=`<polyline fill="none" points="${pts.map(q=>X(q[0])+','+Y(q[1])).join(' ')}" stroke="${pass?'var(--red)':PC[t.priority||2]}" stroke-width="${pass?2.4:1.2}" opacity="${pass?1:.75}" ${d?'stroke-dasharray="5 3"':''}><title>${sc.train_id} ${esc(t.name||'')}</title></polyline>`;
-   if(pass){const q=pts.find(z=>z[0]>=t0)||pts[0];s+=`<text class="lb" fill="var(--red)" x="${X(q[0])+3}" y="${Y(q[1])-3}">${sc.train_id}</text>`}}));
-  R.conflicts.forEach(c=>{const k=S.trk[c.track_id];if(!k||c.time<t0||c.time>t0+span)return;
-   s+=`<circle cx="${X(c.time)}" cy="${Y((S.p[k.a]+S.p[k.b])/2)}" r="7" fill="none" stroke="var(--red)" stroke-width="2"><title>${c.train_a} and ${c.train_b} on ${c.track_id} at ${fmt(c.time)}</title></circle>`});
-  s+='</g>'}
- $('chart').innerHTML=s+`<line x1="${X(S.t)}" x2="${X(S.t)}" y1="${T}" y2="${H-B}" stroke="var(--amb)" stroke-width="1.5"/></svg>`}
+$("connectBtn").onclick=connect;
+$("baselineBtn").onclick=()=>busy("Loading baseline timetable...",loadBaseline);
+$("osBtn").onclick=runOS;
+$("optBtn").onclick=runOptimizer;
+$("beforeTab").onclick=()=>setView("before");
+$("osTab").onclick=()=>setView("os");
+$("optTab").onclick=()=>setView("opt");
 
-function drawStats(){
- const V=[['before','Before'],['os','OS scheduler'],['opt','Optimizer']],m=k=>S.res[k]&&S.res[k].metrics;
- const row=(l,f,fx)=>`<tr><th>${l}</th>${V.map(([k])=>{const x=m(k);if(!x)return '<td>-</td>';const v=x[f],b=m('before')[f];return `<td class="num ${k!=='before'&&v<b?'g':''}">${fx?fx(v):v}</td>`}).join('')}</tr>`;
- $('kpi').innerHTML=`<table><tr><th></th>${V.map(v=>`<th>${v[1]}</th>`).join('')}</tr>${row('Conflicts','conflicts')}${row('Delay added (min)','solver_delay_min',v=>v.toFixed(1))}${row('Fitness (lower is better)','fitness',v=>v.toFixed(0))}</table>`;
- const R=cur();
- $('cl').innerHTML=!R?'':R.conflicts.length?`<table><tr><th>Time</th><th>Track</th><th>Trains</th><th>Type</th></tr>${R.conflicts.slice(0,14).map(c=>`<tr class="click" data-t="${c.time}"><td class="num">${fmt(c.time)}</td><td>${c.track_id}</td><td>${c.train_a}, ${c.train_b}</td><td>${c.kind==='head_on'?'Head-on':'Too close'}</td></tr>`).join('')}</table>${R.conflicts.length>14?`<div class="leg">+ ${R.conflicts.length-14} more</div>`:''}<div class="leg">Click a row to jump to that moment.</div>`:'<div style="color:var(--grn);font-weight:600">No conflicts in this view.</div>';
- document.querySelectorAll('#cl tr.click').forEach(r=>r.onclick=()=>setT(+r.dataset.t));
- const d=R?Object.entries(R.metrics.delay_by_train).sort((a,b)=>b[1]-a[1]).slice(0,8):[],mxd=d.length?d[0][1]:1;
- $('dl').innerHTML=d.length?`<table>${d.map(([k,v])=>`<tr><td>${k}</td><td class="num">${v.toFixed(1)} min</td><td><div class="bar"><i style="width:${v/mxd*100}%"></i></div></td></tr>`).join('')}</table>`:'<div class="leg">No extra delay in this view. Run a solver to see which trains it holds back.</div>';
- const h=S.hist;if(!h.length){$('fit').innerHTML='<div class="leg">Run the optimizer to see fitness improve over iterations.</div>';return}
- const hi=Math.max(...h.map(x=>Math.max(x.best,x.current))),lo=Math.min(...h.map(x=>x.best)),X=i=>40+i/(h.length-1||1)*850,Y=v=>10+(hi===lo?.5:(hi-v)/(hi-lo))*130;
- const ln=(k,c)=>`<polyline fill="none" stroke="${c}" stroke-width="2" points="${h.map((x,i)=>X(i)+','+Y(x[k])).join(' ')}"/>`;
- $('fit').innerHTML=`<svg viewBox="0 0 900 165">${ln('current','#3d5666')}${ln('best','var(--grn)')}<text class="ax" x="4" y="16">${hi.toFixed(0)}</text><text class="ax" x="4" y="140">${lo.toFixed(0)}</text><text class="ax" x="40" y="160">iterations, green = best fitness, grey = current</text></svg>`}
+$("timeSlider").oninput=function(){
+ state.currentTime=num(this.value);
+ render();
+};
 
-function draw(){$('tl').textContent=fmt(S.t);drawMap();drawChart();drawStats();
- document.querySelectorAll('#tabs button').forEach(b=>{b.classList.toggle('on',b.dataset.v===S.view);b.disabled=!S.res[b.dataset.v]})}
+$("playBtn").onclick=function(){
+ if(state.timer){
+  clearInterval(state.timer);
+  state.timer=null;
+  this.textContent="Play";
+  return;
+ }
+ this.textContent="Pause";
+ state.timer=setInterval(()=>{
+  state.currentTime+=2;
+  if(state.currentTime>state.maxTime)state.currentTime=state.minTime;
+  $("timeSlider").value=state.currentTime;
+  render();
+ },100);
+};
 
-async function run(btn,label,fn){const all=document.querySelectorAll('aside button');all.forEach(b=>b.disabled=true);say(label);
- try{await fn();say('Done.')}catch(e){say(String(e.message||e),1)}all.forEach(b=>b.disabled=false);draw()}
-function fresh(){const p=params(),k=[p.headway_min,p.disturb_count,p.disturb_seed].join();if(k!==S.key){S.res={};S.hist=[];S.key=k}}
-function showDist(R){$('dist').innerHTML=Object.entries(R.disturbance||{}).map(([k,v])=>`<span class="chip">${k} +${v} min</span>`).join('')}
-function firstConflict(R){const c=R.conflicts[0];return c?c.time:S.lo}
-const runBase=()=>run($('bBase'),'Loading the delayed timetable...',async()=>{const p=params();S.res={};S.hist=[];S.key=[p.headway_min,p.disturb_count,p.disturb_seed].join();
- S.res.before=await call(`/api/baseline?headway_min=${p.headway_min}&disturb_count=${p.disturb_count}&disturb_seed=${p.disturb_seed}`);
- S.view='before';showDist(S.res.before);range();setT(firstConflict(S.res.before))});
-$('bOS').onclick=()=>run($('bOS'),'Running the OS scheduler...',async()=>{fresh();const r=await call('/api/solve/os',params());S.res.before=r.before;S.res.os=r.after;S.view='os';range();showDist(r.before)});
-$('bOpt').onclick=()=>run($('bOpt'),'Running the optimizer. This can take up to a minute...',async()=>{fresh();const r=await call('/api/solve/optimize',params());S.res.before=r.before;S.res.opt=r.after;S.hist=r.history;S.view='opt';range();showDist(r.before)});
-$('bBase').onclick=runBase;$('conn').onclick=connect;
-$('tm').oninput=e=>{S.t=+e.target.value;draw()};$('span').onchange=draw;
-$('tabs').onclick=e=>{const b=e.target.closest('button');if(b&&!b.disabled){S.view=b.dataset.v;draw()}};
-let timer=null;$('play').onclick=()=>{if(timer){clearInterval(timer);timer=null;$('play').textContent='Play';return}
- $('play').textContent='Pause';timer=setInterval(()=>{if(S.t>=S.hi){S.t=S.lo}setT(S.t+2)},60)};
 connect();
-</script></body></html>
+</script>
+</body>
+</html>
